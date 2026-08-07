@@ -1,0 +1,25 @@
+# Local monitor configuration (contains user-specific settings)
+config/monitor.config.json
+
+# Per-run staging outputs (never committed, never shared)
+output/
+
+# Shareable-package build artifacts
+dist/
+
+# Environment / credentials
+.env
+.env.*
+*.env
+
+# Node (in case a recipient installs @microsoft/workiq globally in-repo)
+node_modules/
+npm-debug.log*
+package-lock.json.local
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

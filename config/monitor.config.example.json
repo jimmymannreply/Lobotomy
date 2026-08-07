@@ -1,0 +1,51 @@
+{
+  "$schema": "../schemas/monitor.config.schema.json",
+  "monitor_name": "Example Program Monitor",
+  "owner": {
+    "display_name": "REPLACE_ME (e.g. Jane Doe)",
+    "upn": "REPLACE_ME@yourcompany.com"
+  },
+  "tenants": [
+    {
+      "name": "Reply",
+      "workiq_profile": "default"
+    }
+  ],
+  "seed_terms": [
+    "REPLACE_ME_KEYWORD_1",
+    "REPLACE_ME_KEYWORD_2"
+  ],
+  "workflow_stages": [
+    "Discovery",
+    "Design",
+    "Build",
+    "Test",
+    "Deploy",
+    "Sign-off"
+  ],
+  "scope": {
+    "meetings": "all",
+    "people_and_chats": [],
+    "emails": "sent_and_received"
+  },
+  "output": {
+    "mode": "local_sync",
+    "upload_dir": "C:/Users/REPLACE_ME/OneDrive - Reply/Focus Tracks/Daily Activity Monitor",
+    "sharepoint_site_url": "https://REPLACE_ME.sharepoint.com/sites/REPLACE_ME",
+    "sharepoint_folder_path": "Shared Documents/Daily Activity Monitor",
+    "local_staging_dir": "./output",
+    "filename_pattern": "sweep-{yyyy}-{mm}-{dd}-{hhmm}"
+  },
+  "schedule": {
+    "cron": "30 8 * * 1-5",
+    "display_time": "Weekdays at 8:30 AM (your local time)"
+  },
+  "review": {
+    "required_on_scheduled": true,
+    "required_on_ondemand": true
+  },
+  "ambiguity": {
+    "borderline_policy": "needs_your_call",
+    "taxonomy_only_matches": "exclude"
+  }
+}

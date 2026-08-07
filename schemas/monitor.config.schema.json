@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reply.example.com/schemas/monitor.config.schema.json",
+  "title": "Reply Daily Activity Monitor Configuration",
+  "description": "Per-user configuration for a Reply Daily Activity Monitor instance. Captured by the /setup wizard. Never share this file publicly - it defines what a specific person watches across M365.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "monitor_name",
+    "tenants",
+    "seed_terms",
+    "scope",
+    "output",
+    "schedule",
+    "review",
+    "ambiguity"
+  ],
+  "properties": {
+    "monitor_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-friendly name of this monitor instance, e.g. 'AEM/Juliette DAM Monitor'."
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The person this monitor belongs to. Used only for local headers in generated output.",
+      "properties": {
+        "display_name": { "type": "string" },
+        "upn": { "type": "string", "format": "email" }
+      }
+    },
+    "tenants": {
+      "type": "array",
+      "minItems": 1,
+      "description": "M365 tenants to sweep. v1 supports one entry (Reply). A second entry (e.g. Valorem) is schema-ready for a future release.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "workiq_profile"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Friendly tenant label, e.g. 'Reply' or 'Valorem'."
+          },
+          "workiq_profile": {
+            "type": "string",
+            "description": "Which WorkIQ MCP sign-in profile to use. Use 'default' unless the recipient has configured named profiles.",
+            "default": "default"
+          }
+        }
+      }
+    },
+    "seed_terms": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Curated trigger keywords/phrases. Primary filter across meetings, email, and Teams.",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "workflow_stages": {
+      "type": "array",
+      "description": "Named end-to-end workflow stages to capture even when no seed term matches (e.g. 'Discovery', 'Design', 'Sign-off').",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["meetings", "people_and_chats", "emails"],
+      "properties": {
+        "meetings": {
+          "description": "Meetings to include. Use 'all' to include everything on the owner's calendar/recap surface, or an array of meeting titles / recurring-series identifiers.",
+          "oneOf": [
+            { "type": "string", "enum": ["all"] },
+            { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          ]
+        },
+        "people_and_chats": {
+          "type": "array",
+          "description": "User UPNs, group names, or Teams chat IDs to always monitor regardless of seed match.",
+          "items": { "type": "string", "minLength": 1 },
+          "default": []
+        },
+        "emails": {
+          "description": "Email scope. Use 'all', 'sent_and_received', or an array of folder names, labels, or sender UPNs.",
+          "oneOf": [
+            { "type": "string", "enum": ["all", "sent_and_received"] },
+            { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          ]
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "local_staging_dir"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["local_sync", "sharepoint_api", "both"],
+          "default": "local_sync",
+          "description": "How approved sweeps are delivered. 'local_sync' writes to a local OneDrive/SharePoint-synced folder and relies on the OneDrive client to sync to the cloud (recommended). 'sharepoint_api' uploads via WorkIQ MCP. 'both' does both."
+        },
+        "upload_dir": {
+          "type": "string",
+          "description": "Local absolute path where approved sweeps are written. Required when mode is 'local_sync' or 'both'. Typically a OneDrive-synced folder like 'C:/Users/<user>/OneDrive - Reply/<subpath>'."
+        },
+        "sharepoint_site_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Root SharePoint site URL. Required when mode is 'sharepoint_api' or 'both'. Example: https://reply.sharepoint.com/sites/DeliveryManagement."
+        },
+        "sharepoint_folder_path": {
+          "type": "string",
+          "description": "Server-relative folder inside the site. Required when mode is 'sharepoint_api' or 'both'."
+        },
+        "local_staging_dir": {
+          "type": "string",
+          "default": "./output",
+          "description": "Local folder for per-run staging output before review."
+        },
+        "filename_pattern": {
+          "type": "string",
+          "default": "sweep-{yyyy}-{mm}-{dd}-{hhmm}",
+          "description": "Basename pattern for generated files (extensions .md/.docx are appended)."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "local_sync" } } },
+          "then": { "required": ["upload_dir"] }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "sharepoint_api" } } },
+          "then": { "required": ["sharepoint_site_url", "sharepoint_folder_path"] }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "both" } } },
+          "then": { "required": ["upload_dir", "sharepoint_site_url", "sharepoint_folder_path"] }
+        }
+      ]
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cron"],
+      "properties": {
+        "cron": {
+          "type": "string",
+          "description": "Cron expression for the daily sweep, e.g. '30 8 * * 1-5' for weekdays at 08:30.",
+          "default": "30 8 * * 1-5"
+        },
+        "display_time": {
+          "type": "string",
+          "description": "Human-readable rendering of the cron, e.g. 'Weekdays at 8:30 AM America/Chicago'."
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_on_scheduled", "required_on_ondemand"],
+      "properties": {
+        "required_on_scheduled": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, scheduled runs stop at the review step and require chat approval before SharePoint upload."
+        },
+        "required_on_ondemand": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, /sweep runs pause for review before upload."
+        }
+      }
+    },
+    "ambiguity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["borderline_policy"],
+      "properties": {
+        "borderline_policy": {
+          "type": "string",
+          "enum": ["needs_your_call", "auto_include", "auto_exclude"],
+          "default": "needs_your_call",
+          "description": "How to handle single-term or generic-term matches with weak context."
+        },
+        "taxonomy_only_matches": {
+          "type": "string",
+          "enum": ["exclude", "needs_your_call"],
+          "default": "exclude",
+          "description": "How to handle items where the seed term appears only as a taxonomy field value (e.g. 'Security' as a category tag)."
+        }
+      }
+    }
+  }
+}
