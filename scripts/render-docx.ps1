@@ -18,7 +18,7 @@
     pandoc's default Word styling is used.
 
 .EXAMPLE
-    pwsh -File scripts/render-docx.ps1 -MarkdownPath "output/2026-08-06-1200/sweep.md" -DocxPath "output/2026-08-06-1200/sweep.docx"
+    powershell -NoProfile -File scripts/render-docx.ps1 -MarkdownPath "output/2026-08-06-1200/sweep.md" -DocxPath "output/2026-08-06-1200/sweep.docx"
 #>
 
 [CmdletBinding()]

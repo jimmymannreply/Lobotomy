@@ -17,7 +17,7 @@
     Override the target zip path. Defaults to <RepoRoot>/dist/reply-daily-activity-monitor.zip.
 
 .EXAMPLE
-    pwsh -File scripts/export-package.ps1
+    powershell -NoProfile -File scripts/export-package.ps1
 #>
 
 [CmdletBinding()]
@@ -149,10 +149,41 @@ if (-not (Test-Path -LiteralPath (Join-Path $stageDir 'config/monitor.config.exa
 }
 
 # Confirm .cursor and prompts made it in.
-foreach ($required in @('.cursor/mcp.json', '.cursor/rules/monitor.md', 'prompts/setup.md', 'prompts/sweep.md', 'prompts/review-and-write.md', 'schemas/monitor.config.schema.json', 'scripts/render-docx.ps1', 'automations/daily-sweep.json', 'README.md', 'SETUP.md')) {
+foreach ($required in @(
+        '.cursor/mcp.json',
+        '.cursor/rules/monitor.md',
+        'prompts/setup.md',
+        'prompts/sweep.md',
+        'prompts/review-and-write.md',
+        'schemas/monitor.config.schema.json',
+        'scripts/render-docx.ps1',
+        'scripts/validate-config.ps1',
+        'scripts/probe-workiq.ps1',
+        'scripts/export-package.ps1',
+        'automations/daily-sweep.json',
+        'README.md',
+        'SETUP.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $stageDir $required))) {
         Fail "Required file missing from staged copy: $required"
     }
+}
+
+# The shipped MCP config must register workiq-preview as an HTTP server. A `command`
+# entry means someone reintroduced the non-existent @microsoft/workiq-preview npm
+# package, which fails to start on every recipient machine.
+$mcpRaw = Get-Content -LiteralPath (Join-Path $stageDir '.cursor/mcp.json') -Raw
+try {
+    $mcp = $mcpRaw | ConvertFrom-Json
+}
+catch {
+    Fail "Refusing to ship - .cursor/mcp.json is not valid JSON: $($_.Exception.Message)"
+}
+$previewEntry = $mcp.mcpServers.'workiq-preview'
+if (-not $previewEntry) {
+    Fail "Refusing to ship - .cursor/mcp.json does not register 'workiq-preview'."
+}
+if ($previewEntry.PSObject.Properties.Name -contains 'command') {
+    Fail "Refusing to ship - 'workiq-preview' is registered as a command. There is no @microsoft/workiq-preview npm package; it must be an HTTP server pointing at https://workiq.svc.cloud.microsoft/mcp."
 }
 
 # Zip it.

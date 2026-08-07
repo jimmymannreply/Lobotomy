@@ -16,6 +16,10 @@
     "ambiguity"
   ],
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Relative path to this schema, so editors provide autocomplete. Not part of the configuration itself."
+    },
     "monitor_name": {
       "type": "string",
       "minLength": 1,
@@ -99,7 +103,7 @@
           "type": "string",
           "enum": ["local_sync", "sharepoint_api", "both"],
           "default": "local_sync",
-          "description": "How approved sweeps are delivered. 'local_sync' writes to a local OneDrive/SharePoint-synced folder and relies on the OneDrive client to sync to the cloud (recommended). 'sharepoint_api' uploads via WorkIQ MCP. 'both' does both."
+          "description": "How approved sweeps are delivered. 'local_sync' writes to a local OneDrive/SharePoint-synced folder and lets the OneDrive client carry the files to SharePoint - this is the only mode implemented in v1. 'sharepoint_api' and 'both' are reserved: WorkIQ has no released tool for uploading raw file bytes (Microsoft documents upload_blob as unreleased), so selecting either mode causes the review flow to stop with a 'not yet supported' error rather than silently doing nothing."
         },
         "upload_dir": {
           "type": "string",
@@ -108,11 +112,11 @@
         "sharepoint_site_url": {
           "type": "string",
           "format": "uri",
-          "description": "Root SharePoint site URL. Required when mode is 'sharepoint_api' or 'both'. Example: https://reply.sharepoint.com/sites/DeliveryManagement."
+          "description": "Root SharePoint site URL that upload_dir syncs to. Informational in 'local_sync' mode - printed in the sweep header so readers know the cloud destination. Example: https://reply.sharepoint.com/sites/DeliveryManagement."
         },
         "sharepoint_folder_path": {
           "type": "string",
-          "description": "Server-relative folder inside the site. Required when mode is 'sharepoint_api' or 'both'."
+          "description": "Server-relative folder inside the site. Informational in 'local_sync' mode; would be the upload target if 'sharepoint_api' mode ever becomes available."
         },
         "local_staging_dir": {
           "type": "string",

@@ -6,9 +6,19 @@ You are running the interactive first-run setup for the Reply Daily Activity Mon
 
 Before asking any config questions, silently check the environment:
 
-1. Read `.cursor/mcp.json` to confirm `workiq` and `workiq-preview` are registered.
-2. Call `GetMcpTools` with `{"pattern": "workiq"}` to confirm both MCP servers are usable in the current Cursor session.
-3. From the shell, run `pandoc --version`. If that fails, also probe the standard winget install locations before declaring pandoc missing:
+1. Read `.cursor/mcp.json` to confirm `workiq` and `workiq-preview` are registered. `workiq` must be a stdio server launched via `npx.cmd`; `workiq-preview` must be an HTTP server pointing at `https://workiq.svc.cloud.microsoft/mcp`. There is no `@microsoft/workiq-preview` npm package - if you see one configured as a `command`, that registration is wrong and will never start.
+2. Call `GetMcpTools` with `{"pattern": "workiq"}` to confirm the MCP servers are usable in the current Cursor session. Cursor prefixes user-scoped servers, so expect names like `user-workiq` rather than a bare `workiq`.
+3. Confirm the WorkIQ EULA has been accepted on this machine. State lives in `$env:USERPROFILE\.work-iq-cli\.workiq.json`, which should contain `{"I-accept-EULA": "true"}`. If the file is absent, accept it once:
+
+   ```powershell
+   npx.cmd -y "@microsoft/workiq@latest" accept-eula
+   ```
+
+   This command *is* the acceptance - it is non-interactive and prints `EULA has been accepted`. Only run it after telling the user you are accepting Microsoft's WorkIQ licence terms on their behalf.
+
+4. Confirm WorkIQ has a cached sign-in. See [Step 0a](#step-0a---workiq-sign-in) below - this is the single most common reason setup stalls.
+
+5. From the shell, run `pandoc --version`. If that fails, also probe the standard winget install locations before declaring pandoc missing:
 
    ```powershell
    Get-Command pandoc -ErrorAction SilentlyContinue
@@ -28,14 +38,25 @@ If pandoc is genuinely missing from both PATH and the standard install locations
 
 Same rule for the WorkIQ MCP: if `.cursor/mcp.json` registers `workiq` / `workiq-preview` but `GetMcpTools` doesn't list them, the servers are registered but the Cursor MCP subsystem hasn't loaded them yet. Tell the user to click the MCP approval banner if one is showing (Cursor sometimes prompts before enabling project-level MCPs), or to fully quit and relaunch Cursor - a plain window reload is not always sufficient. Then re-run `/setup`.
 
-If the WorkIQ servers are registered in `mcp.json` but `GetMcpTools` reports them as `needsAuth`, tell the user to run this once from PowerShell and then reopen Cursor:
+## Step 0a - WorkIQ sign-in
+
+WorkIQ authenticates through Entra ID. **The monitor never asks for, sees, or stores a password or token.** If the user offers to paste credentials into chat, decline and point them here.
+
+On Windows, WorkIQ signs in through the Windows Web Account Manager (WAM) broker: it raises a **native Windows account-picker dialog**, not a device-code prompt. That has one critical consequence:
+
+> A WAM sign-in cannot be completed from an agent-run background shell. There is no window to click, so MSAL fails immediately with `authentication_canceled` / `MsalClientException`.
+
+So when sign-in is needed, launch a **visible** terminal and let the user complete it there:
 
 ```powershell
-npx -y @microsoft/workiq@latest accept-eula
-npx -y @microsoft/workiq@latest ask "Hello"
+Start-Process -FilePath "powershell.exe" -ArgumentList '-NoExit','-NoProfile','-Command','npx.cmd -y "@microsoft/workiq@latest" ask -q "What meetings do I have today?"'
 ```
 
-Do not attempt to complete Entra sign-in from inside chat.
+Tell the user to pick their work account in the dialog that appears, and to come back to chat when the command prints an answer. Tokens are cached by Windows itself (OneAuth / TokenBroker), not in the WorkIQ folder, so the only reliable proof of sign-in is that the `ask` command returned real data. Once it has, re-run the `GetMcpTools` check.
+
+If the MCP server was started *before* the sign-in or EULA acceptance completed, it will be stuck in a `loading` state and will not recover on its own. Tell the user to fully quit and relaunch Cursor so the server restarts against the now-valid credentials.
+
+Do not attempt to complete Entra sign-in from inside chat, and do not retry a failed WAM sign-in in a background shell - it will fail the same way every time.
 
 ## Step 1 - Detect existing config
 
@@ -67,9 +88,28 @@ Fields, in order:
    - "All email surfaces I have access to" -> `"all"`
    - "Only sent + received" -> `"sent_and_received"` (recommended)
    - "Specific folders / labels / senders" -> follow up with a plain chat turn.
-9. **`output.sharepoint_site_url`** (plain chat) - "Full SharePoint site URL where sweeps should be uploaded (e.g. https://valoremreply.sharepoint.com/sites/AEMDAM)."
-10. **`output.sharepoint_folder_path`** (plain chat) - "Server-relative folder inside that site, e.g. 'Shared Documents/Daily Activity Monitor'."
-11. **`schedule.cron`** (`AskQuestion` single-select) with follow-up mapping to cron:
+9. **`output.mode`** - v1 supports exactly one working delivery mode: `"local_sync"`. Approved sweeps are written into a local OneDrive-synced folder and the OneDrive client carries them up to SharePoint.
+
+   Set `output.mode` to `"local_sync"` without asking. If the user asks for a direct SharePoint API upload, explain why it isn't available yet:
+
+   > WorkIQ can read your M365 data and can send mail or create calendar events, but it has no released tool for uploading raw file bytes into a document library - Microsoft documents `upload_blob` as "not released in the current WorkIQ MCP surface". So the monitor writes to your OneDrive-synced folder instead. The files still land in SharePoint; OneDrive does the upload. When Microsoft ships upload support, switching to `sharepoint_api` mode is a config change.
+
+10. **`output.upload_dir`** (plain chat) - the folder approved sweeps are copied into. Before asking, detect the user's synced roots from the shell and offer them as concrete options:
+
+    ```powershell
+    $env:OneDrive; $env:OneDriveCommercial
+    Get-ChildItem "$env:USERPROFILE" -Directory | Where-Object { $_.Name -like 'OneDrive*' -or $_.Name -like '*Reply*' -or $_.Name -like '*Valorem*' } | Select-Object -ExpandProperty FullName
+    ```
+
+    Ask: "Where should approved sweeps be written? This should be a folder inside your OneDrive/SharePoint-synced area so the files sync up automatically." Offer the detected roots via `AskQuestion` plus an "Enter a different path" option.
+
+    Validate the answer before accepting it: the parent directory must already exist. If the leaf folder doesn't exist, ask whether to create it rather than creating it silently. Warn (but don't block) if the chosen path is not under a detected OneDrive root, since a non-synced folder means the files never reach SharePoint.
+
+11. **`output.sharepoint_site_url`** and **`output.sharepoint_folder_path`** (plain chat, both optional) - not used for delivery in `local_sync` mode, but recorded in the config and printed in the sweep header so readers know which SharePoint site the synced folder maps to. Ask once: "Which SharePoint site does that folder sync to? (optional - used for the report header only, press enter to skip)."
+
+12. **`output.local_staging_dir`** - set to `"./output"` without asking. This is the per-run staging area inside the repo, not a user-facing choice.
+
+13. **`schedule.cron`** (`AskQuestion` single-select) with follow-up mapping to cron:
     - "Weekdays at 8:30 AM" -> `30 8 * * 1-5`
     - "Every day at 8:00 AM" -> `0 8 * * *`
     - "Every day at 5:00 PM" -> `0 17 * * *`
@@ -77,14 +117,14 @@ Fields, in order:
 
     Also capture `schedule.display_time` as a human-readable rendering of the choice.
 
-12. **`review.required_on_scheduled`** and **`review.required_on_ondemand`** - default both to `true`. Confirm with a single `AskQuestion`:
-    - "Always pause for chat review before uploading (recommended)"
-    - "Auto-upload scheduled runs, only review on-demand runs"
-    - "Auto-upload everything (not recommended)"
+14. **`review.required_on_scheduled`** and **`review.required_on_ondemand`** - default both to `true`. Confirm with a single `AskQuestion`:
+    - "Always pause for chat review before writing (recommended)"
+    - "Auto-write scheduled runs, only review on-demand runs"
+    - "Auto-write everything (not recommended)"
 
     Set both booleans accordingly.
 
-13. **`ambiguity.borderline_policy`** - default `"needs_your_call"`. Confirm with `AskQuestion`:
+15. **`ambiguity.borderline_policy`** - default `"needs_your_call"`. Confirm with `AskQuestion`:
     - "Send weak/single-term matches to a 'Needs Your Call' review bucket (recommended)"
     - "Auto-include them"
     - "Auto-exclude them"
@@ -95,9 +135,21 @@ Print a compact Markdown table of every captured field and its resolved value. E
 
 Wait for confirmation. If they ask for a change, loop back to that specific question only.
 
-## Step 4 - Validate against the schema
+## Step 4 - Validate the config
 
-Before writing, validate the assembled object against [schemas/monitor.config.schema.json](../schemas/monitor.config.schema.json). If any required field is missing or malformed, explain which field failed and re-prompt only that field. Do not proceed to Step 5 until validation passes.
+Write the assembled object to `config/monitor.config.json` first (Step 5's file), then validate it with the checker:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/validate-config.ps1
+```
+
+Exit code 0 means valid. Exit code 1 means invalid - the script prints one failing field per line.
+
+If validation fails, explain which field failed in plain language and re-prompt **only that field**, then re-run the checker. Do not proceed until it exits 0.
+
+Warnings (printed separately from errors) do not block, but relay them to the user verbatim. The most important one to surface is a destination folder that isn't inside a OneDrive root - that silently means sweeps never reach SharePoint, and the user should know before they rely on it.
+
+Use `powershell`, not `pwsh`: PowerShell 7 is not installed by default on Windows and most recipients will only have 5.1.
 
 ## Step 5 - Write the config file
 
@@ -114,6 +166,6 @@ Use `AskQuestion` to ask: "Install the daily automation now? It will trigger `/s
 
 ## Step 7 - Suggest a first run
 
-End the wizard with: "Setup is complete. Type `/sweep` whenever you want to run your first sweep. I'll stage the results and pause for your review before anything is uploaded to SharePoint."
+End the wizard with: "Setup is complete. Type `/sweep` whenever you want to run your first sweep. I'll stage the results and pause for your review before anything is written to `<upload_dir>`."
 
 Do NOT auto-run `/sweep` at the end of setup.

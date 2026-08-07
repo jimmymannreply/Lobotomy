@@ -1,6 +1,8 @@
 # /sweep - Reply Daily Activity Monitor Sweep
 
-You are running a single sweep of the user's configured M365 activity through the WorkIQ MCP. Follow this file exactly. Do not upload anything to SharePoint here - that happens in [prompts/review-and-write.md](review-and-write.md) after explicit chat approval.
+You are running a single sweep of the user's configured M365 activity through the WorkIQ MCP. Follow this file exactly. Do not write anything to the delivery destination here - that happens in [prompts/review-and-write.md](review-and-write.md) after explicit chat approval.
+
+This whole file is read-only against M365. Do not call `create_entity`, `update_entity`, `delete_entity`, or `do_action` at any point.
 
 ## Step 0 - Load and validate config
 
@@ -23,13 +25,15 @@ Write `output/<timestamp>/run.json` first, containing:
 }
 ```
 
-Update the `status` field as the run progresses (`querying` -> `classifying` -> `staged` -> `uploaded` -> `done`).
+Update the `status` field as the run progresses (`querying` -> `classifying` -> `staged` -> `delivered` -> `done`).
 
 ## Step 2 - Query WorkIQ per seed term across all surfaces
 
-For each entry in `config.seed_terms`, call WorkIQ five times - once per surface. Resolve the WorkIQ server name first via `GetMcpTools` with `{"pattern": "workiq"}` and use whichever appears (`workiq`, `user-workiq`, etc.). Prefer the `retrieve` tool because it returns structured per-source hits with grounding metadata; fall back to `ask` for surfaces where `retrieve` returns nothing.
+Resolve the WorkIQ server names first via `GetMcpTools` with `{"pattern": "workiq"}`. Cursor prefixes user-scoped servers, so expect `user-workiq` and `user-workiq-preview`. Never hardcode a server name.
 
-For each `(seed_term, surface)` pair, use a query template like these (adapt phrasing to the actual WorkIQ tool signature - do not send this literally as JSON):
+Use `ask` on the `workiq` server as the primary query tool. If a result is vague and you need the underlying entity, follow up with the read-only structured tools on `workiq-preview` (`search_paths`, `get_schema`, `fetch`, `fetch_blob`).
+
+For each entry in `config.seed_terms`, query once per surface. Use a query template like these (adapt phrasing to the actual tool signature - do not send this literally as JSON):
 
 | Surface | Query template |
 |---------|----------------|
@@ -37,7 +41,14 @@ For each `(seed_term, surface)` pair, use a query template like these (adapt phr
 | Email | `Find emails from the last 24 hours where "<seed_term>" appears in the subject, body, or attachment metadata. Include sender, recipients, subject, and a 2-sentence excerpt.` |
 | Teams | `Find Teams chats or channel messages from the last 24 hours where "<seed_term>" appears in message text or shared file names. Include channel/chat, author, and a 2-sentence excerpt.` |
 | Files | `Find files I created, edited, shared, or received in the last 24 hours where "<seed_term>" appears in the filename or in the recent-activity summary.` |
-| Copilot activity | `Find Microsoft 365 Copilot activity from the last 24 hours where "<seed_term>" appears in a prompt, response, or cited source.` |
+
+### Copilot activity
+
+Copilot prompt/response history is **not** part of the WorkIQ tool surface - that data lives in Purview audit logs and needs separate admin-granted access. Attempt one probe per sweep:
+
+`Find Microsoft 365 Copilot activity from the last 24 hours where "<seed_term>" appears in a prompt, response, or cited source.`
+
+If it returns nothing usable, record the surface as **unavailable** rather than empty, and say so once in the output. Do not retry it per seed term - a single probe is enough. Never fabricate Copilot activity to fill the section.
 
 Widen the window from 24h to `since <last successful run timestamp from output/*/run.json>` when a prior run exists, so nothing is missed between runs.
 
@@ -108,6 +119,8 @@ Write `output/<timestamp>/sweep.md` with this exact section structure. Do not ad
 | Needs Your Call | ... | ... | ... | ... | ... | ... |
 | Excluded | ... | ... | ... | ... | ... | ... |
 
+Use `n/a` rather than `0` in the Copilot column when that surface was unavailable, and add a footnote under the table: `_Copilot activity is not exposed by WorkIQ; this surface was not swept._` A zero and an unavailable surface mean different things to the reader.
+
 ## Included
 
 ### Meetings
@@ -157,8 +170,10 @@ Include a fenced JSON block with the exact `config_snapshot` from `run.json` so 
 Invoke [scripts/render-docx.ps1](../scripts/render-docx.ps1) via the shell tool, passing the Markdown path:
 
 ```powershell
-pwsh -File scripts/render-docx.ps1 -MarkdownPath "output/<timestamp>/sweep.md" -DocxPath "output/<timestamp>/sweep.docx"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/render-docx.ps1 -MarkdownPath "output/<timestamp>/sweep.md" -DocxPath "output/<timestamp>/sweep.docx"
 ```
+
+Use `powershell`, not `pwsh`. PowerShell 7 is not installed on a default Windows machine, and most recipients will only have Windows PowerShell 5.1. All scripts in this repo are 5.1-compatible.
 
 If pandoc is missing or the conversion fails, quote the troubleshooting section from [SETUP.md](../SETUP.md#pandoc-not-found) and stop before review - do not proceed with only the Markdown file.
 
@@ -166,4 +181,4 @@ If pandoc is missing or the conversion fails, quote the troubleshooting section 
 
 Update `run.json` `status` to `"staged"` and record the file paths. Then invoke the review flow from [prompts/review-and-write.md](review-and-write.md).
 
-Do NOT upload anything to SharePoint in this file. Uploads only happen after explicit chat approval in the review flow.
+Do NOT write anything to `config.output.upload_dir` in this file. Delivery only happens after explicit chat approval in the review flow.

@@ -1,16 +1,16 @@
 # Reply Daily Activity Monitor
 
-A configurable, shareable Cursor Agent + Cursor Automation that sweeps a person's Microsoft 365 activity (Teams, Outlook, meetings, files, Copilot activity) for user-defined seed terms and workflow stages, presents the results in chat for review, and writes both Markdown and Word outputs to a chosen SharePoint location.
+A configurable, shareable Cursor Agent + Cursor Automation that sweeps a person's Microsoft 365 activity (Teams, Outlook, meetings, files) for user-defined seed terms and workflow stages, presents the results in chat for review, and writes both Markdown and Word outputs to a chosen SharePoint-synced location.
 
 Data access is done entirely through Microsoft's [WorkIQ MCP server](https://github.com/microsoft/work-iq) - the monitor never handles raw M365 credentials, and every request runs under the signed-in Entra ID user's own permissions.
 
 ## Quick start
 
-1. Install the prereqs from [SETUP.md#1-prerequisites](SETUP.md#1-prerequisites).
+1. Install the prereqs from [SETUP.md#1-prerequisites](SETUP.md#1-prerequisites), including the one-time EULA acceptance and WorkIQ sign-in. Your tenant also needs [admin consent](SETUP.md#tenant-admin-consent) for WorkIQ - a one-time action for the whole organization.
 2. Clone this repo (or unzip a shared bundle) and open it in Cursor.
 3. In a Cursor chat inside the workspace, type `/setup`.
 4. Type `/sweep` when you want to run your first sweep.
-5. Approve the sweep in chat when the review prompt appears - the monitor uploads both `sweep.md` and `sweep.docx` to the SharePoint folder you configured.
+5. Approve the sweep in chat when the review prompt appears - the monitor writes both `sweep.md` and `sweep.docx` into the OneDrive-synced folder you configured, and OneDrive carries them up to SharePoint.
 
 Full walkthrough is in [SETUP.md](SETUP.md).
 
@@ -21,34 +21,35 @@ flowchart TD
   Trigger([Trigger: /setup, /sweep, /review, or daily automation]) --> Mode{Mode}
   Mode -->|first run| Setup[Setup wizard writes config/monitor.config.json]
   Mode -->|sweep| Load[Load config + validate WorkIQ auth]
-  Load --> Query["Query WorkIQ per seed term across Meetings, Email, Teams, Files, Copilot activity"]
+  Load --> Query["Query WorkIQ per seed term across Meetings, Email, Teams, Files"]
   Query --> Workflow[Also fetch workflow-stage captures unfiltered by seed]
   Workflow --> Merge["Merge, dedup, classify: Included / Needs-Your-Call / Excluded"]
   Merge --> Stage["Write staged sweep.md and sweep.docx to output/YYYY-MM-DD-HHMM/"]
   Stage --> Review[Present summary + buckets in chat for review]
-  Review -->|approve| Upload[workiq-preview blob upload to SharePoint path]
+  Review -->|approve| Copy[Copy both files into the OneDrive-synced folder]
   Review -->|edit| Merge
-  Upload --> Done([Done: link to SharePoint files])
+  Copy --> Sync[OneDrive client syncs them to SharePoint]
+  Sync --> Done([Done: paths reported in chat])
 ```
 
 ## Slash commands
 
 The monitor is driven from Cursor chat. Once installed, you can run:
 
-- `/setup` - interactive wizard defined in [prompts/setup.md](prompts/setup.md). Captures seed terms, workflow stages, meetings/people/emails scope, SharePoint destination, and daily schedule. Writes `config/monitor.config.json` (gitignored).
-- `/sweep` - the sweep orchestrator defined in [prompts/sweep.md](prompts/sweep.md). Queries WorkIQ across five surfaces, classifies items into Included / Needs-Your-Call / Excluded buckets, and stages `sweep.md` + `sweep.docx` under `output/<timestamp>/`.
-- `/review` - the review + upload flow defined in [prompts/review-and-write.md](prompts/review-and-write.md). Loads the newest staged sweep, walks the Needs-Your-Call bucket, and on explicit approval uploads both files to SharePoint via the `workiq-preview` MCP.
+- `/setup` - interactive wizard defined in [prompts/setup.md](prompts/setup.md). Captures seed terms, workflow stages, meetings/people/emails scope, destination folder, and daily schedule. Writes `config/monitor.config.json` (gitignored).
+- `/sweep` - the sweep orchestrator defined in [prompts/sweep.md](prompts/sweep.md). Queries WorkIQ across the configured surfaces, classifies items into Included / Needs-Your-Call / Excluded buckets, and stages `sweep.md` + `sweep.docx` under `output/<timestamp>/`.
+- `/review` - the review + delivery flow defined in [prompts/review-and-write.md](prompts/review-and-write.md). Loads the newest staged sweep, walks the Needs-Your-Call bucket, and on explicit approval copies both files into the configured OneDrive-synced folder.
 - `/export` - builds a clean shareable zip (`dist/reply-daily-activity-monitor.zip`) via [scripts/export-package.ps1](scripts/export-package.ps1). Zero user data - safe to send to anyone at Reply.
 
-The scheduled daily run is installed by `/setup` as a Cursor Automation using the template in [automations/daily-sweep.json](automations/daily-sweep.json). Per the design, scheduled runs also pause for chat review - they never auto-upload to SharePoint.
+The scheduled daily run is installed by `/setup` as a Cursor Automation using the template in [automations/daily-sweep.json](automations/daily-sweep.json). Per the design, scheduled runs also pause for chat review - they never auto-write.
 
 ## Design guardrails
 
 These are enforced by [.cursor/rules/monitor.md](.cursor/rules/monitor.md) and by the review flow:
 
-- **Read-only against M365.** The monitor never sends email, posts to Teams, or edits shared files.
-- **No SharePoint write without explicit chat approval.** Every upload requires a review turn - scheduled runs included.
-- **No credentials in chat.** WorkIQ handles Entra ID sign-in via device-code flow. The monitor never asks the user to paste tokens.
+- **Read-only against M365.** The monitor never sends email, posts to Teams, or edits shared files. This matters more than it sounds: the `workiq-preview` server exposes real mutating tools (`create_entity`, `update_entity`, `delete_entity`, `do_action`) that can send mail and delete items. The agent rule forbids all of them.
+- **No write to the destination without explicit chat approval.** Every delivery requires a review turn - scheduled runs included.
+- **No credentials in chat.** WorkIQ handles Entra ID sign-in through the Windows account broker. The monitor never asks the user to paste passwords or tokens.
 - **No user data in the shareable export.** `/export` strips `config/monitor.config.json`, `output/`, `.git/`, and any `.env*` files, and verifies the strip before zipping.
 - **No invented M365 data.** If WorkIQ returns nothing for a query, the sweep says so.
 
@@ -56,7 +57,7 @@ These are enforced by [.cursor/rules/monitor.md](.cursor/rules/monitor.md) and b
 
 - [README.md](README.md) - this file.
 - [SETUP.md](SETUP.md) - recipient-facing install and troubleshooting.
-- [.cursor/mcp.json](.cursor/mcp.json) - registers the `workiq` and `workiq-preview` MCP servers.
+- [.cursor/mcp.json](.cursor/mcp.json) - registers the `workiq` MCP server (local stdio via `npx.cmd`) and `workiq-preview` (hosted HTTP + OAuth). Note these two are configured differently; there is no `@microsoft/workiq-preview` npm package.
 - [.cursor/rules/monitor.md](.cursor/rules/monitor.md) - project rule that binds slash commands to prompt files and enforces the guardrails above.
 - [prompts/setup.md](prompts/setup.md) - setup wizard.
 - [prompts/sweep.md](prompts/sweep.md) - sweep orchestration and Markdown output contract.
@@ -66,6 +67,10 @@ These are enforced by [.cursor/rules/monitor.md](.cursor/rules/monitor.md) and b
 - `config/monitor.config.json` - the user's local config (gitignored, created by `/setup`).
 - [scripts/render-docx.ps1](scripts/render-docx.ps1) - pandoc wrapper that produces `sweep.docx` from `sweep.md`.
 - [scripts/export-package.ps1](scripts/export-package.ps1) - builds the shareable zip.
+- [scripts/validate-config.ps1](scripts/validate-config.ps1) - checks `config/monitor.config.json` and reports failing fields. Called by `/setup`.
+- [scripts/probe-workiq.ps1](scripts/probe-workiq.ps1) - diagnostic that drives the WorkIQ stdio server over JSON-RPC to dump its tool inventory, for troubleshooting outside Cursor.
+
+All scripts target **Windows PowerShell 5.1** so they run on a stock Windows machine. Invoke them with `powershell`, not `pwsh`.
 - [automations/daily-sweep.json](automations/daily-sweep.json) - Cursor Automation template consumed by `/setup`.
 - `output/` - gitignored per-run staging folder.
 - `dist/` - gitignored shareable-package build output.
@@ -92,4 +97,14 @@ Every sweep places each hit into one of three buckets:
 
 - No support for a second tenant (Valorem). The config schema leaves a hook for it, and the setup wizard tells the user multi-tenant is planned.
 - No raw meeting recording downloads. The monitor captures recap + transcript excerpts via WorkIQ instead.
-- No custom Microsoft Graph SDK code. All M365 reads/writes flow through WorkIQ MCP - the sweep uses `workiq`, and the upload uses `workiq-preview`.
+- No custom Microsoft Graph SDK code. All M365 reads flow through the WorkIQ MCP servers.
+- No direct SharePoint API upload. WorkIQ has no released file-upload tool, so delivery goes through a OneDrive-synced folder. See [SETUP.md](SETUP.md#how-files-reach-sharepoint).
+
+## Known constraints
+
+| Constraint | Impact | Source |
+|---|---|---|
+| WorkIQ requires tenant admin consent | Nobody in the tenant can use the monitor until an admin consents once | [Microsoft work-iq README](https://github.com/microsoft/work-iq) |
+| `upload_blob` is unreleased | No direct SharePoint API upload; delivery is via OneDrive sync | [workiq-preview README](https://github.com/microsoft/work-iq/blob/main/plugins/workiq-preview/README.md) |
+| Sign-in uses the Windows WAM broker | Sign-in must be completed in a visible terminal; it cannot be automated from an agent shell | Verified: MSAL `RuntimeBroker` raises a native dialog |
+| `@microsoft/workiq-preview` is not on npm | `workiq-preview` must be registered as an HTTP server, not an `npx` command | Verified 404 against the public npm registry |

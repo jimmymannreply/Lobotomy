@@ -1,8 +1,8 @@
 # /review - Reply Daily Activity Monitor Review and Upload
 
-You are running the review turn for a staged sweep. This is the ONLY path in the monitor that may upload to SharePoint. It runs after [prompts/sweep.md](sweep.md) has staged `sweep.md` and `sweep.docx` under `output/<timestamp>/`.
+You are running the review turn for a staged sweep. This is the ONLY path in the monitor that may write to the delivery destination. It runs after [prompts/sweep.md](sweep.md) has staged `sweep.md` and `sweep.docx` under `output/<timestamp>/`.
 
-Never skip the approval gate. Scheduled Automation runs land here the same way as `/sweep`, and they must not auto-upload.
+Never skip the approval gate. Scheduled Automation runs land here the same way as `/sweep`, and they must not auto-write.
 
 ## Step 0 - Locate the staged run
 
@@ -44,17 +44,17 @@ If there are zero Needs Your Call items, skip this step entirely - do not ask a 
 
 Use `AskQuestion` with one final question:
 
-- Prompt: `"Ready to upload sweep.md and sweep.docx to <sharepoint_site_url>/<sharepoint_folder_path>?"`
+- Prompt: `"Ready to write sweep.md and sweep.docx to <upload_dir>?"`
 - Options:
-  - `upload` - "Yes, upload both files now"
+  - `write` - "Yes, write both files now"
   - `edit_first` - "Let me edit sweep.md in the editor first, then I'll say /review again"
-  - `discard` - "Discard this sweep - do not upload"
+  - `discard` - "Discard this sweep - do not write"
 
 Handle each response:
 
 - **`edit_first`**: open `sweep.md` via `open_resource` and tell the user to save the file, then re-run `/review`. Set `run.json` `status` back to `"staged"` (unchanged) and stop.
 - **`discard`**: update `run.json` `status` to `"discarded"`. Do not delete the local files. Stop.
-- **`upload`**: continue to Step 4.
+- **`write`**: continue to Step 4.
 
 ## Step 4 - Re-render sweep.docx if sweep.md changed
 
@@ -63,10 +63,10 @@ If the user promoted/demoted any items in Step 2, rewrite `sweep.md` to reflect 
 Then re-invoke the docx renderer so the two files stay in sync:
 
 ```powershell
-pwsh -File scripts/render-docx.ps1 -MarkdownPath "output/<timestamp>/sweep.md" -DocxPath "output/<timestamp>/sweep.docx"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/render-docx.ps1 -MarkdownPath "output/<timestamp>/sweep.md" -DocxPath "output/<timestamp>/sweep.docx"
 ```
 
-If the renderer fails, stop before upload.
+If the renderer fails, stop before writing anything to the destination.
 
 ## Step 5 - Deliver approved outputs
 
@@ -74,7 +74,7 @@ Filename resolution uses the pattern from `config.output.filename_pattern` with 
 
 Branch on `config.output.mode`:
 
-### Mode `local_sync` (default, recommended)
+### Mode `local_sync` (the only implemented mode)
 
 Copy `sweep.md` and `sweep.docx` from `output/<timestamp>/` into `config.output.upload_dir`, renaming to the resolved filename pattern. Use the PowerShell shell tool:
 
@@ -83,30 +83,24 @@ Copy-Item -LiteralPath "output/<timestamp>/sweep.md" -Destination "<upload_dir>/
 Copy-Item -LiteralPath "output/<timestamp>/sweep.docx" -Destination "<upload_dir>/<resolved-name>.docx" -Force
 ```
 
-The OneDrive/SharePoint sync client on the user's machine handles cloud upload. Verify both destination files exist after the copy. If `upload_dir` doesn't exist or is not writable, do NOT create parent directories silently - stop, tell the user which path failed, and leave `run.json` at `"staged"`.
+The OneDrive/SharePoint sync client on the user's machine handles cloud upload. Verify both destination files exist after the copy, and confirm their sizes are non-zero. If `upload_dir` doesn't exist or is not writable, do NOT create parent directories silently - stop, tell the user which path failed, and leave `run.json` at `"staged"`.
 
-### Mode `sharepoint_api`
+### Modes `sharepoint_api` and `both` - not available
 
-Resolve the WorkIQ server via `GetMcpTools` with `{"pattern": "workiq"}` (`workiq`, `user-workiq`, etc.).
+Neither mode is implemented, because WorkIQ cannot upload files. Microsoft documents `upload_blob` as "not released in the current WorkIQ MCP surface" and directs callers to OneDrive/SharePoint for uploads. The other write tools (`create_entity`, `do_action`) act on mail and calendar entities, not document-library bytes, and this monitor is forbidden from calling them.
 
-Discover the target document library path with `search_paths` and `get_schema` (e.g. search paths matching the site's driveItem collection). Then upload both files by calling `create_entity` against the resolved `driveItem` path with the file bytes base64-encoded. If the library exposes a dedicated upload action instead, use `do_action` with that action's schema.
+If `config.output.mode` is either of these, stop and tell the user:
 
-Upload both files to `<sharepoint_site_url>/<sharepoint_folder_path>/<resolved-name>.md` and `.docx`. Upload sweep.md first, then sweep.docx. If either upload fails:
+> Your config asks for a direct SharePoint API upload, but WorkIQ has no released file-upload tool, so I can't do that. Your sweep is staged at `output/<timestamp>/` and nothing was lost. Set `output.mode` to `local_sync` and `output.upload_dir` to a OneDrive-synced folder - or re-run `/setup` - and then `/review` again.
 
-1. Do NOT retry silently. Tell the user which upload failed and what the WorkIQ error said.
-2. Leave `run.json` `status` at `"staged"` so `/review` can be re-run after the underlying issue is fixed.
-3. Common causes: user lacks Edit permission on the folder, folder path doesn't exist, WorkIQ token expired. Quote the relevant remediation from [SETUP.md](../SETUP.md#sharepoint-upload-fails-with-permission-denied).
-
-### Mode `both`
-
-Do the `local_sync` copy first, then the `sharepoint_api` upload. Report both destinations in Step 6. If the API upload fails after the local copy succeeded, mark the run as `"partially_uploaded"` in `run.json` and tell the user only the local sync landed.
+Leave `run.json` `status` at `"staged"`. Do not silently fall back to `local_sync`: the user asked for a specific destination and deserves to know it didn't happen.
 
 ## Step 6 - Confirm and finalize
 
 On successful delivery:
 
-1. Update `run.json` `status` to `"uploaded"` (or `"partially_uploaded"` per mode `both`) and record the destination paths / URLs.
-2. Post a final chat message with the destination path(s) and a one-line reminder that the daily automation is armed for `<display_time>`. For `local_sync`, remind the user that OneDrive will sync the files up to the cloud - opening the file in File Explorer will show a sync status icon.
+1. Update `run.json` `status` to `"delivered"` and record the destination paths.
+2. Post a final chat message with the destination paths and a one-line reminder that the daily automation is armed for `<display_time>`. Remind the user that OneDrive does the actual upload to SharePoint - opening the folder in File Explorer will show a sync status icon on each file, and a green checkmark means it landed.
 3. Update `run.json` `status` to `"done"`.
 
 Do NOT delete the local `output/<timestamp>/` folder. It's the local audit trail; the user can prune it themselves.
