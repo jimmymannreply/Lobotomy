@@ -71,7 +71,7 @@ Walk through these questions in order. Use plain chat for freeform text answers 
 
 Fields, in order:
 
-1. **`monitor_name`** (plain chat) - "What do you want to call this monitor? For example, 'AEM/Juliette DAM Monitor' or 'Contoso Migration Watch'."
+1. **`monitor_name`** (plain chat) - "What do you want to call this monitor? For example, 'Contoso Migration Watch' or 'Northwind Platform Monitor'."
 2. **`owner.display_name`** and **`owner.upn`** (plain chat, one turn each) - display name, then work email.
 3. **`tenants`** - v1 supports exactly one tenant. Default to `[{ "name": "Reply", "workiq_profile": "default" }]` and confirm with the user via `AskQuestion` (options: "Reply" / "Enter a different tenant name"). Do not offer multi-tenant here even if the user asks - explain that multi-tenant is planned for a future release and tell them to file a request.
 4. **`seed_terms`** (plain chat) - quote the working definition from the original spec:

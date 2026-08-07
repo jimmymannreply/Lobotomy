@@ -23,7 +23,7 @@
     "monitor_name": {
       "type": "string",
       "minLength": 1,
-      "description": "Human-friendly name of this monitor instance, e.g. 'AEM/Juliette DAM Monitor'."
+      "description": "Human-friendly name of this monitor instance, e.g. 'Contoso Migration Watch'."
     },
     "owner": {
       "type": "object",

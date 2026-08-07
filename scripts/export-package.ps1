@@ -100,8 +100,15 @@ foreach ($rel in $stripPaths) {
     }
 }
 
-# Also nuke any *.env files anywhere in the tree.
-Get-ChildItem -LiteralPath $stageDir -Recurse -Force -Include '*.env', '.env*' | ForEach-Object {
+# Also nuke any dotenv files anywhere in the tree.
+#
+# Match on Name with Where-Object rather than -Include: under Windows PowerShell 5.1,
+# -Include combined with -LiteralPath -Recurse matches unintended entries (it matched
+# and deleted the .cursor directory, which silently shipped a package with no MCP
+# config and no agent rule). Restricting to files and testing the name is unambiguous.
+Get-ChildItem -LiteralPath $stageDir -Recurse -Force -File | Where-Object {
+    $_.Name -eq '.env' -or $_.Name -like '.env.*' -or $_.Name -like '*.env'
+} | ForEach-Object {
     Write-Host "  strip env: $($_.FullName.Substring($stageDir.Length + 1))" -ForegroundColor Yellow
     Remove-Item -LiteralPath $_.FullName -Force
 }
@@ -134,9 +141,23 @@ $leakedOutput = Get-ChildItem -LiteralPath (Join-Path $stageDir 'output') -Force
 if ($leakedOutput) {
     $leaks += "output/ has user files: $($leakedOutput.Name -join ', ')"
 }
-$leakedEnv = Get-ChildItem -LiteralPath $stageDir -Recurse -Force -Include '*.env', '.env*' -ErrorAction SilentlyContinue
+$leakedEnv = Get-ChildItem -LiteralPath $stageDir -Recurse -Force -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -eq '.env' -or $_.Name -like '.env.*' -or $_.Name -like '*.env' }
 if ($leakedEnv) {
     $leaks += "leftover env files: $($leakedEnv.FullName -join ', ')"
+}
+
+# Content scan: catch identifiers that leak through in text even when no user-data
+# file is present (e.g. a real project codename left in an example, or the builder's
+# username baked into a sample path).
+$identityPatterns = @($env:USERNAME, $env:USERDOMAIN) | Where-Object { $_ -and $_.Length -ge 4 }
+foreach ($pattern in $identityPatterns) {
+    $found = Get-ChildItem -LiteralPath $stageDir -Recurse -File -Force -ErrorAction SilentlyContinue |
+        Select-String -Pattern $pattern -SimpleMatch -ErrorAction SilentlyContinue
+    if ($found) {
+        $where = ($found | ForEach-Object { $_.Path.Substring($stageDir.Length + 1) } | Sort-Object -Unique) -join ', '
+        $leaks += "'$pattern' (your username/domain) appears in: $where"
+    }
 }
 
 if ($leaks.Count -gt 0) {
