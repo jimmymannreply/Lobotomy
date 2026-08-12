@@ -161,7 +161,13 @@ Do not print the full file contents in chat after writing - just confirm the pat
 
 Use `AskQuestion` to ask: "Install the daily automation now? It will trigger `/sweep` on your schedule (`<display_time>`) and stop at review."
 
-- **If yes**: read [automations/daily-sweep.json](../automations/daily-sweep.json). Substitute the user's chosen cron into the `cron.cron` field. Then call the `cursor-app-control.open_automation` tool with the resulting object as `prefillWorkflowData`. Tell the user to click "Save" in the Automations editor that opens - explain that the editor is where scheduling and any deferred fields are finalized.
+- **If yes**: read [automations/daily-sweep.json](../automations/daily-sweep.json) and make two substitutions:
+  1. Replace `REPLACE_ME` in `name` with the user's `monitor_name`.
+  2. Replace `workflow.triggers[0].cron.cron` with the cron they chose.
+
+  Then call `cursor-app-control.open_automation` passing the **whole** object (`name`, `description`, and `workflow`) as `prefillWorkflowData`. Do not add any other top-level keys - the form only understands these.
+
+  Cursor will ask you to approve the prefill before the form trusts it; that approval is expected. Tell the user to click "Save" in the Automations editor that opens, and explain that the editor is where scheduling and any deferred fields are finalized - the automation does not exist until they save.
 - **If no**: tell them they can install it later with `/setup` again or by opening the Automations editor manually and importing from `automations/daily-sweep.json`.
 
 ## Step 7 - Suggest a first run

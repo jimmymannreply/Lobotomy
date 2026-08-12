@@ -1,7 +1,6 @@
 {
-  "_comment": "Cursor Automation TEMPLATE for the Reply Daily Activity Monitor. The /setup wizard substitutes the user's chosen cron and monitor name before opening the Automations editor (or the user can manually import this file and edit both fields).",
   "name": "REPLACE_ME Daily Activity Monitor - Daily Sweep",
-  "description": "Runs /sweep on the configured schedule. Pauses for chat review before writing to the OneDrive-synced folder or SharePoint; never auto-writes.",
+  "description": "Runs /sweep on the configured schedule. Pauses for chat review before writing to the OneDrive-synced folder; never auto-writes.",
   "workflow": {
     "triggers": [
       {
@@ -13,7 +12,7 @@
     "actions": [],
     "prompts": [
       {
-        "prompt": "You are the Reply Daily Activity Monitor. This is your scheduled daily invocation.\n\nRun the sweep exactly as defined in prompts/sweep.md, then hand off to prompts/review-and-write.md. Do NOT write anything to the delivery destination yet - the review step in that file requires the owner's explicit chat approval, and that rule applies to scheduled runs too.\n\nWhen the sweep is staged, post the review summary in this chat and wait for the owner to approve or edit before writing. If they don't respond, leave the run in a 'staged' state - it can be picked up later by typing 'review the sweep' or /review.\n\nIf config/monitor.config.json is missing or invalid, or the WorkIQ MCP isn't authenticated, do not attempt the sweep - post a one-line diagnostic and stop."
+        "prompt": "You are the Reply Daily Activity Monitor. This is your scheduled daily invocation.\n\nRun the sweep exactly as defined in prompts/sweep.md, then hand off to prompts/review-and-write.md. Do NOT write anything to the delivery destination yet - the review step in that file requires the owner's explicit chat approval, and that rule applies to scheduled runs too.\n\nWhen the sweep is staged, post the review summary in this chat and wait for the owner to approve or edit before writing. If they don't respond, leave the run in a 'staged' state - it can be picked up later by typing 'review the sweep' or /review.\n\nBe aware that WorkIQ's ask tool takes 30 seconds to several minutes per call, so this run may take a long time. That is expected, not a hang.\n\nIf config/monitor.config.json is missing or invalid, or the WorkIQ MCP isn't authenticated, do not attempt the sweep - post a one-line diagnostic and stop. In particular, WorkIQ sign-in cannot be completed from a scheduled run because it needs an interactive Windows dialog; if authentication has lapsed, say so and stop rather than retrying."
       }
     ],
     "model": "",
