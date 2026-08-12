@@ -104,7 +104,11 @@ Every sweep places each hit into one of three buckets:
 
 | Constraint | Impact | Source |
 |---|---|---|
-| WorkIQ requires tenant admin consent | Nobody in the tenant can use the monitor until an admin consents once | [Microsoft work-iq README](https://github.com/microsoft/work-iq) |
+| The Reply tenant is not configured for WorkIQ | Queries fall back to the slower Microsoft Graph proxy. Needs `auth consent` per user, or one-time tenant enablement by an admin. See [SETUP.md](SETUP.md#tenant-admin-consent) | Verified: `IncorrectConfiguration` / "Your tenant does not yet have the WorkIQ service configured" |
+| `ask` takes 30s to several minutes per call | Sweeps are slow and can hit Cursor's MCP timeout. Keep seed-term lists short and specific | Verified: `Maximum total timeout exceeded` on a broad query |
+| The MCP surface is only `ask` | No `retrieve` / `fetch` / `search_paths` on the `workiq` server, despite what its docs imply. Everything routes through one natural-language tool | Verified tool inventory via `GetMcpTools` |
 | `upload_blob` is unreleased | No direct SharePoint API upload; delivery is via OneDrive sync | [workiq-preview README](https://github.com/microsoft/work-iq/blob/main/plugins/workiq-preview/README.md) |
 | Sign-in uses the Windows WAM broker | Sign-in must be completed in a visible terminal; it cannot be automated from an agent shell | Verified: MSAL `RuntimeBroker` raises a native dialog |
 | `@microsoft/workiq-preview` is not on npm | `workiq-preview` must be registered as an HTTP server, not an `npx` command | Verified 404 against the public npm registry |
+
+The CLI also has more commands than Microsoft documents - `auth login`, `auth consent`, `config`, `policy`, `fetch`, `search-paths`, `create`, `do-action` and others. Run `npx.cmd -y "@microsoft/workiq@latest" --help` to see the full list. Only `ask` is surfaced through the MCP server.

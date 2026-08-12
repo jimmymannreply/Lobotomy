@@ -40,17 +40,23 @@ Two WorkIQ servers exist and they are **not** interchangeable:
 
 | Server | Transport | Role here |
 |---|---|---|
-| `workiq` | local stdio, `npx.cmd -y @microsoft/workiq@latest mcp` | natural-language queries (`ask`) |
-| `workiq-preview` | hosted HTTP + OAuth at `https://workiq.svc.cloud.microsoft/mcp` | structured entity reads (`fetch`, `search_paths`, `get_schema`, `fetch_blob`) |
+| `workiq` | local stdio, `npx.cmd -y @microsoft/workiq@latest mcp` | natural-language queries (`ask`) - the workhorse |
+| `workiq-preview` | hosted HTTP + OAuth at `https://workiq.svc.cloud.microsoft/mcp` | structured entity reads, when authenticated |
 
 There is no `@microsoft/workiq-preview` npm package. If you ever see it registered as a `command`, that config is broken - fix the registration rather than working around it.
 
 At runtime, always resolve the actual server names first with `GetMcpTools` using `{"pattern": "workiq"}`. Cursor prefixes user-scoped servers, so expect `user-workiq` and `user-workiq-preview` rather than bare names. Never hardcode a server name.
 
+**Verify before you plan.** The `workiq` server exposes only `ask`, `list_agents`, and `accept_eula`. It has no `retrieve`, `fetch`, or `search_paths` - earlier versions of this rule claimed otherwise and it was wrong. Always confirm a tool exists via `GetMcpTools` before building a flow around it.
+
 ### Tools you may call
 
-- `ask` - natural-language M365 queries. Primary tool for the sweep phase.
-- `fetch`, `search_paths`, `get_schema`, `fetch_blob` - read-only structured lookups, for enriching a hit when `ask` returns something vague.
+- `ask` - natural-language M365 queries. This is the primary and usually the only tool you need.
+- `fetch`, `search_paths`, `get_schema`, `fetch_blob` on `workiq-preview` - read-only structured lookups, for enriching a hit when `ask` returns something vague. Only if that server reports `ready`.
+
+### Performance is a design constraint
+
+`ask` is backed by M365 Copilot and takes 30 seconds to several minutes per call. Cursor's MCP timeout can fire first. Never issue more queries than the sweep design calls for, warn the user before starting long runs, and treat a timeout as a distinct outcome from an empty result.
 
 ### Tools you may NOT call
 

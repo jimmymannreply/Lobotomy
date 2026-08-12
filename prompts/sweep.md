@@ -31,7 +31,28 @@ Update the `status` field as the run progresses (`querying` -> `classifying` -> 
 
 Resolve the WorkIQ server names first via `GetMcpTools` with `{"pattern": "workiq"}`. Cursor prefixes user-scoped servers, so expect `user-workiq` and `user-workiq-preview`. Never hardcode a server name.
 
-Use `ask` on the `workiq` server as the primary query tool. If a result is vague and you need the underlying entity, follow up with the read-only structured tools on `workiq-preview` (`search_paths`, `get_schema`, `fetch`, `fetch_blob`).
+### What the MCP surface actually offers
+
+The `workiq` MCP server exposes only three usable tools. Verified inventory:
+
+| Tool | Signature | Use |
+|---|---|---|
+| `ask` | `question` (required), `fileUrls`, `conversationId`, `agentId` | the only query tool - all surfaces go through this |
+| `list_agents` | none | lists M365 Copilot agents; rarely needed |
+| `accept_eula` | `eulaUrl` | one-time licence acceptance |
+
+There is no `retrieve` tool. There is no `fetch`, `search_paths`, `get_schema`, or `fetch_blob` on this server - those exist only on `workiq-preview`, and only when that server is authenticated. Do not plan around tools you have not confirmed with `GetMcpTools`.
+
+### Budget your queries - `ask` is slow
+
+`ask` is backed by M365 Copilot and takes **30 seconds to several minutes per call**, longer on tenants using the Graph proxy fallback. Cursor's MCP timeout can fire before Copilot answers.
+
+Consequences you must design around:
+
+- Issue **one query per (seed term, surface)** pair and no more. Do not fan out into variations.
+- Before starting, compute the query count (`seed_terms x surfaces`). If it exceeds 12, tell the user the estimated duration up front and offer to narrow the seed list via `AskQuestion` rather than silently starting a very long run.
+- Pass `conversationId` from the first response into subsequent calls for the same surface. This keeps Copilot's context warm and produces more consistent results across seed terms.
+- If a call times out, retry **once** with a narrower question (shorter window, single field). If it times out again, record that `(seed_term, surface)` pair as `query_failed` in `run.json` and carry on. Never silently drop it, and never present a failed query as "no results" - those mean different things.
 
 For each entry in `config.seed_terms`, query once per surface. Use a query template like these (adapt phrasing to the actual tool signature - do not send this literally as JSON):
 

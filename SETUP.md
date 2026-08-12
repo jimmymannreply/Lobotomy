@@ -24,9 +24,34 @@ pandoc --version
 
 ### Tenant admin consent
 
-WorkIQ reads your Microsoft 365 data through a Microsoft-operated service, and that service needs **admin consent in your tenant** before anyone can use it. Microsoft's own documentation is explicit: "To access Microsoft 365 tenant data, the WorkIQ CLI and MCP Server need to be consented to permissions that require administrative rights on the tenant."
+WorkIQ reads your Microsoft 365 data through a Microsoft-operated service, and that service needs **admin consent in your tenant**. Microsoft's documentation is explicit: "To access Microsoft 365 tenant data, the WorkIQ CLI and MCP Server need to be consented to permissions that require administrative rights on the tenant."
 
-If nobody at your organization has consented yet, you will hit a consent wall on first sign-in and setup cannot continue. Send your tenant admin to Microsoft's [Tenant Administrator Enablement Guide](https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md), which includes a one-click consent URL. This is a one-time action for the whole tenant.
+**As of this writing, the Reply tenant has not been configured for WorkIQ.** You'll see this on first use:
+
+```
+warn: WorkIQ endpoint auth failed with consent/SP error. Falling back to Graph proxy.
+      Error Message: IncorrectConfiguration
+
+Your tenant does not yet have the WorkIQ service configured.
+   Using the Microsoft Graph proxy endpoint as a fallback.
+   To enable the direct WorkIQ endpoint (recommended), run:
+     workiq auth consent
+```
+
+This is not fatal. There are two paths:
+
+**Path A - Graph proxy fallback (works without a tenant admin).** WorkIQ automatically falls back to querying Microsoft Graph directly using your own delegated permissions. You still need to grant those permissions once:
+
+```powershell
+npx.cmd -y "@microsoft/workiq@latest" auth login
+npx.cmd -y "@microsoft/workiq@latest" auth consent
+```
+
+Both raise interactive dialogs, so run them from a visible terminal. Whether `auth consent` succeeds without an admin depends on whether your tenant permits user consent for delegated scopes; if it doesn't, you'll get an "approval required" message and need Path B.
+
+**Path B - full tenant enablement (needs an admin, better long-term).** Send your tenant admin to Microsoft's [Tenant Administrator Enablement Guide](https://github.com/microsoft/work-iq/blob/main/ADMIN-INSTRUCTIONS.md), which includes a one-click consent URL. One-time for the whole organization, and it unlocks the faster direct WorkIQ endpoint instead of the Graph proxy.
+
+Expect the Graph proxy to be noticeably slower than the direct endpoint - see [sweeps are slow](#sweeps-are-slow-or-time-out).
 
 ### Accept the WorkIQ EULA
 
@@ -40,13 +65,21 @@ It should print `EULA has been accepted` and write `%USERPROFILE%\.work-iq-cli\.
 
 ### Sign in to WorkIQ
 
-Also one-time per machine. On Windows this uses the Windows account broker, so it raises a **native account-picker dialog** - you must run it from a real terminal window you can see and click:
+Also one-time per machine. On Windows this uses the Windows account broker, so it raises a **native account-picker dialog** - you must run it from a real terminal window you can see and click.
+
+Run these three in order from a visible PowerShell window:
 
 ```powershell
-npx.cmd -y "@microsoft/workiq@latest" ask -q "What meetings do I have today?"
+npx.cmd -y "@microsoft/workiq@latest" auth login
+npx.cmd -y "@microsoft/workiq@latest" auth consent
+npx.cmd -y "@microsoft/workiq@latest" ask -q "How many meetings do I have today?"
 ```
 
-Pick your work account when the dialog appears. When the command prints an answer about your calendar, you're signed in and Windows has cached the token. If it instead throws `MsalClientException` with `authentication_canceled`, the dialog was dismissed or never got a chance to show - see [troubleshooting](#workiq-sign-in-fails-with-authentication_canceled) below.
+`auth login` sets your default account. `auth consent` grants the permission scopes WorkIQ needs. The third command proves it all works - when it prints an answer about your calendar, you're done and Windows has cached the token.
+
+Note that `auth login` and `auth consent` are not in Microsoft's published command table, but they exist and are the reliable way to establish credentials. Run `npx.cmd -y "@microsoft/workiq@latest" auth --help` to see them.
+
+If you get `MsalClientException` with `authentication_canceled`, the dialog was dismissed or never got a chance to show - see [troubleshooting](#workiq-sign-in-fails-with-authentication_canceled).
 
 ## 2. Get the monitor
 
@@ -255,6 +288,23 @@ The monitor copies approved sweeps into `output.upload_dir` and relies on the On
 ### The review step says SharePoint API upload is not supported
 
 Expected. `output.mode` is set to `sharepoint_api` or `both`, and neither is implemented - WorkIQ has no released file-upload tool. Set `output.mode` to `local_sync` in `config/monitor.config.json` and set `output.upload_dir` to a OneDrive-synced folder, or just re-run `/setup`.
+
+### Sweeps are slow or time out
+
+WorkIQ's `ask` tool is backed by Microsoft 365 Copilot, and a single question routinely takes **30 seconds to several minutes**. On a tenant using the Graph proxy fallback it's slower still. Cursor's MCP calls also have their own timeout, so an over-broad question can fail with `Maximum total timeout exceeded` before Copilot ever answers.
+
+What this means in practice:
+
+- **Keep seed-term lists short.** The sweep issues roughly one query per seed term per surface. Ten seed terms across four surfaces is forty Copilot round-trips, which can take the better part of an hour.
+- **Prefer specific multi-word phrases.** They return smaller, faster, more relevant result sets than broad single words.
+- **Ask narrow questions.** If a query times out, the monitor should retry with a tighter scope rather than repeating the same request.
+- **Expect scheduled runs to take a while.** This is normal, not a hang. The run stays in `staged` state until you review it, so a slow sweep is never lost.
+
+If a sweep times out repeatedly, cut the seed-term list down and confirm a single `ask` works at all:
+
+```powershell
+npx.cmd -y "@microsoft/workiq@latest" ask -q "How many meetings do I have today?"
+```
 
 ### The daily automation didn't fire
 
