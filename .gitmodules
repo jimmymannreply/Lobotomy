@@ -1,0 +1,3 @@
+[submodule "partner-story-bot"]
+	path = partner-story-bot
+	url = https://github.com/jimmymannreply/partner-story-bot.git
