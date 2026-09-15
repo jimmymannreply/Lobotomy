@@ -167,14 +167,27 @@ if (Has $config 'output') {
                     $warnings += "output.upload_dir does not exist yet and will need to be created: $uploadDir"
                 }
             }
-            $syncRoots = @($env:OneDrive, $env:OneDriveCommercial) | Where-Object { $_ }
+            # $env:OneDrive usually points at the *personal* OneDrive, so a correct
+            # work path like "OneDrive - Reply" would look unsynced. Enumerate the
+            # OneDrive* directories under the profile as well.
+            # Wrap each collection in @(): under PowerShell 5.1 a single-item pipeline
+            # result is a bare string, and += on a string concatenates rather than
+            # appending, which silently corrupts the root list.
+            $syncRoots = @(@($env:OneDrive, $env:OneDriveCommercial) | Where-Object { $_ })
+            $syncRoots += @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Force -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -like 'OneDrive*' } |
+                    Select-Object -ExpandProperty FullName)
+            $syncRoots = @($syncRoots | Sort-Object -Unique)
+
             if ($syncRoots.Count -gt 0) {
+                $normalized = $uploadDir.Replace('/', '\')
                 $underSync = $false
                 foreach ($root in $syncRoots) {
-                    if ($uploadDir -like "$root*") { $underSync = $true }
+                    if ($normalized -like "$root*") { $underSync = $true }
                 }
                 if (-not $underSync) {
                     $warnings += "output.upload_dir is not under a detected OneDrive root, so approved sweeps will stay on this machine and never reach SharePoint: $uploadDir"
+                    $warnings += "Detected sync roots on this machine: $($syncRoots -join '; ')"
                 }
             }
         }
